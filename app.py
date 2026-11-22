@@ -1,234 +1,384 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
 import matplotlib.pyplot as plt
+import joblib
 from pathlib import Path
 
-st.set_page_config(page_title="FermentAI | Process Intelligence", page_icon="🧬", layout="wide")
+# ============================================================
+# FermentAI | ML-Based Microbial alpha-Amylase Production Optimizer
+# ============================================================
 
-BASE = Path(__file__).resolve().parent
-MODEL_PATH = BASE / "random_forest_model.pkl"
-DATA_PATH = BASE / "BBD_29_Runs_For_Verification_FIXED.csv"
+st.set_page_config(
+    page_title="FermentAI | Fermentation Optimizer",
+    page_icon="🧫",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+ROOT = Path(__file__).resolve().parent
+MODEL_PATH = ROOT / "random_forest_model.pkl"
+DATA_PATH = ROOT / "BBD_29_Runs_For_Verification_FIXED.csv"
 
 FEATURES = ["Initial_pH", "Temperature_C", "Agitation_rpm", "Incubation_Time_h"]
-TARGET = "Amylase_Activity"
+FEATURE_LABELS = {
+    "Initial_pH": "Initial pH",
+    "Temperature_C": "Temperature (°C)",
+    "Agitation_rpm": "Agitation (rpm)",
+    "Incubation_Time_h": "Incubation time (h)"
+}
+DEFAULTS = {
+    "Initial_pH": 6.0,
+    "Temperature_C": 35,
+    "Agitation_rpm": 130,
+    "Incubation_Time_h": 24
+}
+RANGES = {
+    "Initial_pH": (4.0, 8.0, 0.1),
+    "Temperature_C": (25, 45, 1),
+    "Agitation_rpm": (120, 140, 1),
+    "Incubation_Time_h": (12, 48, 1)
+}
 
-# ---------- visual system ----------
+# ------------------------- Styling -------------------------
 st.markdown("""
 <style>
-:root { --ink:#142b3b; --muted:#637587; --teal:#087f78; --mint:#e7f6f3; --line:#e3eaf0; }
-.stApp { background:#f6f9fb; color:var(--ink); }
-[data-testid="stSidebar"] { background:#ffffff; border-right:1px solid #e5edf2; }
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2 { color:#123449; }
-.block-container { padding-top:1.8rem; padding-bottom:2.5rem; max-width:1400px; }
-h1,h2,h3 { color:#142b3b !important; letter-spacing:-.02em; }
-p, label, li { color:#354c5e; }
-div[data-testid="stMetric"] { background:white; border:1px solid var(--line); padding:16px 18px; border-radius:14px; box-shadow:0 2px 8px rgba(22,45,64,.035); }
-div[data-testid="stMetricLabel"] { color:#627789; }
-div[data-testid="stMetricValue"] { color:#087f78; }
-.stButton>button, .stDownloadButton>button { border-radius:10px; border:1px solid #087f78; background:#087f78; color:white; font-weight:600; }
-.stButton>button:hover, .stDownloadButton>button:hover { border-color:#06645f; background:#06645f; color:white; }
-div[data-testid="stAlert"] { border-radius:12px; }
-.hero { background:linear-gradient(110deg,#123449,#087f78); border-radius:20px; padding:28px 32px; color:#fff; margin-bottom:20px; }
-.hero h1 { color:white !important; font-size:2.25rem; margin:0; }
-.hero p { color:#e5f6f3; font-size:1.05rem; margin:.5rem 0 0; }
-.section-card { background:white; border:1px solid var(--line); border-radius:16px; padding:18px 20px; }
-.small-note { color:#667b8c; font-size:.88rem; }
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
+html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
+.stApp { background: #f5f8fb; color: #172b3a; }
+[data-testid="stHeader"] { background: rgba(245,248,251,0.92); }
+.block-container { padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1440px; }
+h1, h2, h3 { font-family: 'Manrope', sans-serif; color: #142d40; }
+.hero {
+    background: linear-gradient(120deg, #12384a 0%, #126b70 100%);
+    padding: 2rem 2.2rem; border-radius: 20px; color: white; margin-bottom: 1.4rem;
+}
+.hero h1 { color: white; font-size: 2.25rem; margin: 0 0 .4rem 0; }
+.hero p { color: #d8eeee; margin: 0; font-size: 1.02rem; }
+.kpi {
+    background: white; border: 1px solid #e2eaf0; border-radius: 16px;
+    padding: 1rem 1.2rem; min-height: 112px;
+}
+.kpi-label { color: #607687; font-size: .83rem; font-weight: 600; }
+.kpi-value { color: #12384a; font-family: 'Manrope',sans-serif; font-size: 1.65rem; font-weight: 800; margin-top: .3rem; }
+.kpi-note { color: #8193a0; font-size: .76rem; margin-top: .1rem; }
+.panel {
+    background: white; border: 1px solid #e2eaf0; border-radius: 16px;
+    padding: 1.2rem 1.3rem; margin-bottom: 1rem;
+}
+.small-muted { color: #6b7f8d; font-size: .88rem; }
+div[data-testid="stMetric"] {
+    background: white; border: 1px solid #e2eaf0; border-radius: 14px; padding: 14px;
+}
+.stButton > button { border-radius: 10px; font-weight: 600; }
+section[data-testid="stSidebar"] { background: #edf3f6; }
+hr { border-color: #e1e9ee; }
 </style>
 """, unsafe_allow_html=True)
 
+# ------------------------- Data/model loading -------------------------
 @st.cache_resource
-def load_model():
-    return joblib.load(MODEL_PATH)
+def load_model(path_string):
+    return joblib.load(path_string)
 
 @st.cache_data
-def load_data():
-    if not DATA_PATH.exists():
-        return None
-    return pd.read_csv(DATA_PATH)
+def load_dataset(path_string):
+    return pd.read_csv(path_string)
 
-try:
-    model = load_model()
-except Exception as exc:
-    model = None
-    model_error = str(exc)
+def find_target_column(df):
+    candidates = [
+        "Amylase_Activity_U_mL", "Amylase_Activity", "Activity_U_mL",
+        "Enzyme_Activity_U_mL", "Alpha_Amylase_Activity", "Predicted_Activity",
+        "Activity", "Response"
+    ]
+    for name in candidates:
+        if name in df.columns:
+            return name
+    # Use the first non-feature numeric column as a best-effort target.
+    numeric = [c for c in df.select_dtypes(include=np.number).columns if c not in FEATURES]
+    return numeric[0] if numeric else None
+
+def model_feature_order(model):
+    names = getattr(model, "feature_names_in_", None)
+    if names is not None:
+        names = list(names)
+        if all(name in FEATURES for name in names):
+            return names
+    return FEATURES
+
+def predict_one(model, params):
+    order = model_feature_order(model)
+    row = pd.DataFrame([[params[name] for name in order]], columns=order)
+    return float(np.asarray(model.predict(row)).reshape(-1)[0])
+
+model = None
+model_error = None
+if MODEL_PATH.exists():
+    try:
+        model = load_model(str(MODEL_PATH))
+    except Exception as exc:
+        model_error = str(exc)
 else:
-    model_error = ""
+    model_error = "random_forest_model.pkl was not found in the app folder."
 
-data = load_data()
-if model is None:
-    st.error("The saved Random Forest model could not be loaded. Confirm random_forest_model.pkl is in the repository.")
-    st.code(model_error)
-    st.stop()
-if data is None:
-    st.error("Dataset file not found. Confirm BBD_29_Runs_For_Verification_FIXED.csv is in the repository.")
-    st.stop()
+dataset = None
+dataset_error = None
+if DATA_PATH.exists():
+    try:
+        dataset = load_dataset(str(DATA_PATH))
+    except Exception as exc:
+        dataset_error = str(exc)
 
-# feature names guard: preserve trained model's feature order if present
-model_features = list(getattr(model, "feature_names_in_", FEATURES))
-if set(model_features) != set(FEATURES):
-    st.error(f"Model input features do not match this app. Found: {model_features}")
-    st.stop()
+# ------------------------- Sidebar -------------------------
+st.sidebar.markdown("## 🧫 FermentAI")
+st.sidebar.caption("Fermentation intelligence platform")
+page = st.sidebar.radio(
+    "NAVIGATION",
+    ["Overview", "Fermentation Optimizer", "Parameter Analysis",
+     "ML Insights", "Dataset Explorer", "Knowledge Center"]
+)
+st.sidebar.divider()
+st.sidebar.caption("Microbial α-amylase • Submerged fermentation")
+st.sidebar.caption("Prototype version")
 
-def predict_one(ph, temp, agitation, time_h):
-    row = pd.DataFrame([[ph, temp, agitation, time_h]], columns=FEATURES)
-    row = row[model_features]
-    return float(model.predict(row)[0])
+# ------------------------- Helpers -------------------------
+def hero(title, subtitle):
+    st.markdown(
+        f'<div class="hero"><h1>{title}</h1><p>{subtitle}</p></div>',
+        unsafe_allow_html=True
+    )
 
-def plot_style(ax):
-    ax.set_facecolor("#ffffff")
-    ax.grid(axis="y", alpha=.18)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["left"].set_color("#dce5eb")
-    ax.spines["bottom"].set_color("#dce5eb")
-    ax.tick_params(colors="#5d7182")
-    ax.xaxis.label.set_color("#40576a")
-    ax.yaxis.label.set_color("#40576a")
+def kpi(label, value, note=""):
+    st.markdown(
+        f'<div class="kpi"><div class="kpi-label">{label}</div>'
+        f'<div class="kpi-value">{value}</div><div class="kpi-note">{note}</div></div>',
+        unsafe_allow_html=True
+    )
 
-# sidebar
-st.sidebar.markdown("## 🧬 FermentAI")
-st.sidebar.caption("MICROBIAL PROCESS INTELLIGENCE")
-page = st.sidebar.radio("WORKSPACE", ["Overview", "Fermentation Optimizer", "Parameter Analysis", "ML Insights", "Dataset Explorer", "Knowledge Center"])
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Process**  Bacillus sp.")
-st.sidebar.markdown("**Product**  α-Amylase")
-st.sidebar.markdown("**Mode**  Submerged fermentation")
-st.sidebar.caption("Prototype • model-generated dataset")
+def require_model():
+    if model is None:
+        st.error("The Random Forest model could not be loaded.")
+        st.code(model_error or "Unknown model-loading error")
+        st.info("Check that random_forest_model.pkl is uploaded beside app.py and that joblib is listed in requirements.txt.")
+        return False
+    return True
 
-# header
-st.markdown('<div class="hero"><h1>FermentAI</h1><p>Machine-learning exploration of microbial α-amylase production under submerged fermentation.</p></div>', unsafe_allow_html=True)
-st.caption("Research prototype • predictions are model-based and require experimental validation")
-
+# ------------------------- Overview -------------------------
 if page == "Overview":
-    st.title("Process overview")
-    st.write("Explore fermentation conditions, inspect the dataset and estimate α-amylase activity using the saved Random Forest model.")
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Literature reference", "145.32 U/mL")
-    c2.metric("Design runs", f"{len(data)}")
-    c3.metric("Predictor", "Random Forest")
-    c4.metric("Process", "Submerged")
+    hero("FermentAI", "Data-driven modelling and machine-learning support for microbial α-amylase production.")
+    st.markdown("### Project overview")
+    st.write(
+        "FermentAI is a prototype decision-support application for exploring how selected "
+        "submerged-fermentation conditions relate to predicted α-amylase activity."
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        kpi("Model", "Random Forest", "Regression model")
+    with c2:
+        kpi("Input factors", "04", "pH, temperature, agitation, time")
+    with c3:
+        kpi("Design reference", "29 runs", "Box–Behnken design")
+    with c4:
+        kpi("Fermentation", "SmF", "Submerged cultivation")
+    st.markdown("### Workflow")
+    cols = st.columns(4)
+    workflow = [
+        ("01", "Set conditions", "Choose pH, temperature, agitation and incubation time."),
+        ("02", "Run prediction", "The saved regression model estimates the response."),
+        ("03", "Explore factors", "Review one-factor response curves and model insights."),
+        ("04", "Inspect data", "Explore the available design dataset and export records.")
+    ]
+    for col, (num, title, desc) in zip(cols, workflow):
+        with col:
+            st.markdown(f'<div class="panel"><div class="small-muted">{num}</div><b>{title}</b><p class="small-muted">{desc}</p></div>', unsafe_allow_html=True)
+    st.warning(
+        "Scientific transparency: the CSV supplied with this prototype is a reconstructed/"
+        "model-generated dataset for software demonstration, not the original raw experimental "
+        "measurements from the reference publication. Predictions must not be presented as "
+        "experimentally validated results."
+    )
+    if model is None:
+        st.error(f"Model status: unavailable — {model_error}")
+    else:
+        st.success("Model file loaded successfully.")
 
-    left,right = st.columns([1.25,1])
-    with left:
-        st.subheader("Activity distribution in the current dataset")
-        fig,ax=plt.subplots(figsize=(7,3.4))
-        ax.hist(data[TARGET].dropna(), bins=10, edgecolor="white")
-        ax.set_xlabel("Amylase activity (U/mL)")
-        ax.set_ylabel("Run count")
-        plot_style(ax)
-        st.pyplot(fig, use_container_width=True)
-    with right:
-        st.subheader("Process conditions")
-        st.markdown("""<div class="section-card">
-        <b>Organism</b>: Bacillus sp.<br><br>
-        <b>Product</b>: α-Amylase<br><br>
-        <b>Fermentation</b>: Submerged cultivation<br><br>
-        <b>Experimental design</b>: Box–Behnken Design<br><br>
-        <b>Inputs</b>: pH, temperature, agitation and incubation time
-        </div>""", unsafe_allow_html=True)
-    st.warning("Dataset integrity notice: the 29 activity values in the uploaded dataset are model-generated/reconstructed, not original measured experimental results. Model outputs are demonstrations—not validated experimental recommendations.")
-
+# ------------------------- Fermentation Optimizer -------------------------
 elif page == "Fermentation Optimizer":
-    st.title("Fermentation optimizer")
-    st.write("Set process conditions within the study ranges. The saved Random Forest model returns an estimated activity.")
-    a,b = st.columns(2)
-    with a:
-        ph = st.slider("Initial pH", 4.0, 8.0, 6.0, 0.1)
-        temp = st.slider("Temperature (°C)", 25, 45, 35, 1)
-    with b:
-        agitation = st.slider("Agitation (rpm)", 120, 140, 130, 1)
-        time_h = st.slider("Incubation (hours)", 12, 48, 24, 1)
-    pred = predict_one(ph,temp,agitation,time_h)
-    st.markdown("---")
-    m1,m2 = st.columns([1,2])
-    m1.metric("Predicted activity", f"{pred:,.2f} U/mL")
-    with m2:
-        st.subheader("Selected conditions")
-        st.write(f"**pH {ph:.1f}** · **{temp} °C** · **{agitation} rpm** · **{time_h} h**")
-        st.progress(max(0.0,min(pred/145.32,1.0)))
-        st.caption("Progress bar is scaled to the 145.32 U/mL literature reference; it is not a probability or confidence score.")
-    st.warning("This prediction is generated by the saved Random Forest trained on reconstructed/model-generated activity values. It is not experimentally validated.")
-    st.download_button("Download this prediction", pd.DataFrame([{"Initial_pH":ph,"Temperature_C":temp,"Agitation_rpm":agitation,"Incubation_Time_h":time_h,"Predicted_Amylase_Activity_U_mL":pred}]).to_csv(index=False), "fermentai_prediction.csv", "text/csv")
+    hero("Fermentation Optimizer", "Enter process conditions and estimate α-amylase activity.")
+    if require_model():
+        left, right = st.columns([1.05, 0.95], gap="large")
+        with left:
+            st.markdown("### Process parameters")
+            ph = st.slider("Initial pH", 4.0, 8.0, 6.0, 0.1)
+            temp = st.slider("Temperature (°C)", 25, 45, 35, 1)
+            agitation = st.slider("Agitation speed (rpm)", 120, 140, 130, 1)
+            incubation = st.slider("Incubation time (hours)", 12, 48, 24, 1)
+            run_prediction = st.button("Predict enzyme activity", type="primary", use_container_width=True)
+        with right:
+            st.markdown("### Prediction result")
+            if run_prediction or "last_prediction" not in st.session_state:
+                params = {
+                    "Initial_pH": float(ph),
+                    "Temperature_C": float(temp),
+                    "Agitation_rpm": float(agitation),
+                    "Incubation_Time_h": float(incubation)
+                }
+                try:
+                    st.session_state["last_prediction"] = predict_one(model, params)
+                    st.session_state["last_params"] = params
+                except Exception as exc:
+                    st.error(f"Prediction failed: {exc}")
+            if "last_prediction" in st.session_state:
+                st.metric("Predicted α-amylase activity", f'{st.session_state["last_prediction"]:.2f} U/mL')
+                st.caption("Model estimate only — not a measured laboratory result.")
+                st.markdown("**Conditions used**")
+                for key, value in st.session_state["last_params"].items():
+                    st.write(f"• {FEATURE_LABELS[key]}: {value}")
+        st.info("The model estimates activity for the selected input combination. It does not experimentally optimize or validate fermentation conditions.")
 
+# ------------------------- Parameter Analysis -------------------------
 elif page == "Parameter Analysis":
-    st.title("Parameter response explorer")
-    st.write("One-factor-at-a-time model predictions. Other conditions are held at the reference setting.")
-    selected = st.selectbox("Parameter to explore", ["Initial_pH", "Temperature_C", "Agitation_rpm", "Incubation_Time_h"])
-ranges = {"Initial_pH":np.linspace(4,8,41), "Temperature_C":np.arange(25,46), "Agitation_rpm":np.arange(120,141), "Incubation_Time_h":np.arange(12,49)}
-base = {"Initial_pH":6.0,"Temperature_C":35,"Agitation_rpm":130,"Incubation_Time_h":24}
-rows = []
-for val in ranges[selected]:
-    params = base.copy()
-    params[selected] = val
-    rows.append({"x":val,"pred":predict_one(params["Initial_pH"],params["Temperature_C"],params["Agitation_rpm"],params["Incubation_Time_h"])})
+    hero("Parameter Analysis", "Explore how changing one process factor affects the model prediction.")
+    if require_model():
+        selected = st.selectbox(
+            "Parameter to explore",
+            ["Initial_pH", "Temperature_C", "Agitation_rpm", "Incubation_Time_h"],
+            format_func=lambda key: FEATURE_LABELS[key]
+        )
+        base = DEFAULTS.copy()
+        low, high, step = RANGES[selected]
+        if selected == "Initial_pH":
+            values = np.linspace(low, high, 41)
+        else:
+            values = np.arange(low, high + 1, step)
+        rows = []
+        try:
+            for value in values:
+                params = base.copy()
+                params[selected] = float(value)
+                prediction = predict_one(model, params)
+                rows.append({"Parameter value": float(value), "Predicted activity (U/mL)": prediction})
+            curve = pd.DataFrame(rows)
+            fig, ax = plt.subplots(figsize=(9, 4.5))
+            ax.plot(curve["Parameter value"], curve["Predicted activity (U/mL)"], marker="o", linewidth=2)
+            ax.axvline(DEFAULTS[selected], linestyle="--", alpha=0.65, label="Reference setting")
+            ax.set_xlabel(FEATURE_LABELS[selected])
+            ax.set_ylabel("Predicted activity (U/mL)")
+            ax.set_title(f"Predicted response across {FEATURE_LABELS[selected]}")
+            ax.grid(True, alpha=0.25)
+            ax.legend()
+            st.pyplot(fig, use_container_width=True)
+            st.dataframe(curve, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download response data",
+                curve.to_csv(index=False).encode("utf-8"),
+                file_name=f"FermentAI_{selected}_response.csv",
+                mime="text/csv"
+            )
+        except Exception as exc:
+            st.error(f"Could not generate the response curve: {exc}")
 
-curve = pd.DataFrame(rows)
-    base = {"Initial_pH":6.0,"Temperature_C":35,"Agitation_rpm":130,"Incubation_Time_h":24}
-    rows=[]
-    for val in ranges[selected]:
-        params=base.copy(); params[selected]=val
-        rows.append({"x":val,"pred":predict_one(params["Initial_pH"],params["Temperature_C"],params["Agitation_rpm"],params["Incubation_Time_h"])})
-    curve=pd.DataFrame(rows)
-    fig,ax=plt.subplots(figsize=(8,4))
-    ax.plot(curve.x,curve.pred,marker="o",markersize=3)
-    ax.set_xlabel(selected); ax.set_ylabel("Predicted activity (U/mL)")
-    plot_style(ax)
-    st.pyplot(fig,use_container_width=True)
-    st.dataframe(curve.rename(columns={"x":selected,"pred":"Predicted activity (U/mL)"}), use_container_width=True, hide_index=True)
-    st.download_button("Export curve data", curve.to_csv(index=False), f"{selected}_response_curve.csv", "text/csv")
-    st.info("These are model-generated response curves, not experimental response surfaces.")
-
+# ------------------------- ML Insights -------------------------
 elif page == "ML Insights":
-    st.title("Model insights")
-    st.write("A transparent look at the model and the data available in this prototype.")
-    st.metric("Estimator", type(model).__name__)
-    st.metric("Model training rows represented in dataset", len(data))
-    if hasattr(model,"feature_importances_"):
-        fi=pd.DataFrame({"Parameter":list(getattr(model, "feature_names_in_", FEATURES)),"Importance":model.feature_importances_})
-        fi=fi.sort_values("Importance",ascending=True)
-        st.subheader("Feature importance")
-        fig,ax=plt.subplots(figsize=(7,3.6))
-        ax.barh(fi["Parameter"],fi["Importance"])
-        ax.set_xlabel("Relative importance")
-        plot_style(ax)
-        st.pyplot(fig,use_container_width=True)
-        st.dataframe(fi.sort_values("Importance",ascending=False),hide_index=True,use_container_width=True)
-    st.subheader("Limitations")
-    st.markdown("""
-    - Only 29 design rows are available.
-    - Activity values are reconstructed/model-generated rather than authentic measured outcomes.
-    - This makes model performance metrics unsuitable as evidence of real predictive validity.
-    - No independent experimental validation has been performed.
-    - Predictions should not be interpreted as confirmed optimum conditions.
-    """)
-    st.warning("Current dataset provenance limits scientific conclusions. Experimental measurements are needed before claiming validated optimization.")
+    hero("ML Insights", "Review the saved model and the information available for interpretation.")
+    if require_model():
+        st.markdown("### Model information")
+        a, b = st.columns(2)
+        with a:
+            st.markdown('<div class="panel"><b>Algorithm</b><p class="small-muted">Random Forest Regressor</p></div>', unsafe_allow_html=True)
+        with b:
+            st.markdown('<div class="panel"><b>Model input variables</b><p class="small-muted">Initial pH, temperature, agitation speed and incubation time</p></div>', unsafe_allow_html=True)
+        importances = getattr(model, "feature_importances_", None)
+        if importances is not None:
+            order = model_feature_order(model)
+            if len(order) == len(importances):
+                fi = pd.DataFrame({"Parameter": [FEATURE_LABELS.get(x, x) for x in order],
+                                   "Importance": np.asarray(importances, dtype=float)})
+                fi = fi.sort_values("Importance", ascending=True)
+                st.markdown("### Feature importance")
+                fig, ax = plt.subplots(figsize=(8, 4))
+                ax.barh(fi["Parameter"], fi["Importance"])
+                ax.set_xlabel("Importance score")
+                ax.set_title("Random Forest feature importance")
+                ax.grid(axis="x", alpha=0.2)
+                st.pyplot(fig, use_container_width=True)
+                st.caption("Feature importance indicates model reliance, not cause-and-effect or biological mechanism.")
+            else:
+                st.info("Feature importance could not be aligned with the model's input variables.")
+        else:
+            st.info("This model does not expose feature_importances_.")
+        st.warning("The model was trained using a reconstructed/model-generated target dataset. Its performance is not independent experimental validation.")
+        if hasattr(model, "n_estimators"):
+            st.write(f"Number of trees: **{model.n_estimators}**")
 
+# ------------------------- Dataset Explorer -------------------------
 elif page == "Dataset Explorer":
-    st.title("Dataset explorer")
-    st.write("Review the bundled 29-run table or upload another CSV to inspect.")
-    up=st.file_uploader("Optional: upload a CSV for inspection",type=["csv"])
-    view=pd.read_csv(up) if up is not None else data.copy()
-    st.caption(f"{view.shape[0]} rows · {view.shape[1]} columns")
-    if TARGET in view.columns:
-        lo,hi=float(view[TARGET].min()),float(view[TARGET].max())
-        if lo < hi:
-            filt=st.slider("Activity filter (U/mL)",lo,hi,(lo,hi))
-            view=view[view[TARGET].between(filt[0],filt[1])]
-    st.dataframe(view,use_container_width=True,hide_index=True)
-    st.download_button("Download displayed data",view.to_csv(index=False),"fermentation_dataset.csv","text/csv")
+    hero("Dataset Explorer", "Inspect, filter and export the fermentation design dataset.")
+    uploaded = st.file_uploader("Upload a CSV dataset (optional)", type=["csv"])
+    df = None
+    if uploaded is not None:
+        try:
+            df = pd.read_csv(uploaded)
+            st.success("Uploaded dataset loaded.")
+        except Exception as exc:
+            st.error(f"Could not read uploaded CSV: {exc}")
+    elif dataset is not None:
+        df = dataset.copy()
+    elif dataset_error:
+        st.error(f"Dataset could not be loaded: {dataset_error}")
+    else:
+        st.info("No default CSV found. Upload a CSV to explore it.")
+    if df is not None:
+        st.markdown("### Dataset summary")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Rows", f"{len(df):,}")
+        m2.metric("Columns", f"{len(df.columns):,}")
+        m3.metric("Missing cells", f"{int(df.isna().sum().sum()):,}")
+        st.dataframe(df, use_container_width=True, height=380)
+        numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+        if numeric_cols:
+            st.markdown("### Filter numeric values")
+            filter_col = st.selectbox("Choose a numeric column", numeric_cols)
+            min_value = float(df[filter_col].min())
+            max_value = float(df[filter_col].max())
+            if np.isfinite(min_value) and np.isfinite(max_value) and min_value < max_value:
+                selected_range = st.slider(
+                    f"Range for {filter_col}",
+                    min_value=min_value,
+                    max_value=max_value,
+                    value=(min_value, max_value)
+                )
+                filtered = df[df[filter_col].between(selected_range[0], selected_range[1])]
+            else:
+                filtered = df.copy()
+            st.write(f"Showing **{len(filtered)}** of **{len(df)}** rows.")
+            st.dataframe(filtered, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download displayed data",
+                filtered.to_csv(index=False).encode("utf-8"),
+                file_name="FermentAI_filtered_dataset.csv",
+                mime="text/csv"
+            )
+        else:
+            st.download_button("Download dataset", df.to_csv(index=False).encode("utf-8"),
+                               file_name="FermentAI_dataset.csv", mime="text/csv")
 
+# ------------------------- Knowledge Center -------------------------
 elif page == "Knowledge Center":
-    st.title("Knowledge center")
-    with st.expander("What is α-amylase?"):
-        st.write("α-Amylase is an enzyme that cleaves internal α-1,4 glycosidic bonds in starch, producing shorter carbohydrate chains.")
+    hero("Knowledge Center", "Key concepts behind the FermentAI prototype.")
     with st.expander("What is submerged fermentation?"):
-        st.write("Submerged fermentation cultivates microorganisms in a liquid nutrient medium with controlled process conditions such as temperature, pH, agitation and time.")
-    with st.expander("What is Box–Behnken Design?"):
-        st.write("Box–Behnken Design is a response-surface experimental design that samples combinations of factor levels to study process responses while avoiding corner combinations.")
-    with st.expander("Why use machine learning?"):
-        st.write("Machine-learning models can explore relationships between process parameters and measured outcomes. Their reliability depends on representative, authentic training data and independent validation.")
-    with st.expander("FermentAI workflow"):
-        st.markdown("**Input process factors → Dataset → Random Forest prediction → Candidate condition exploration → Experimental validation**")
-    st.info("The bundled dataset is reconstructed/model-generated. The scientific workflow is a prototype for demonstrating data exploration and model-based prediction.")
+        st.write("Submerged fermentation (SmF) is a microbial cultivation process in which microorganisms grow in a liquid nutrient medium. Process conditions such as pH, temperature, agitation and incubation time can influence growth and enzyme production.")
+    with st.expander("What is α-amylase?"):
+        st.write("α-Amylase is an enzyme that hydrolyses internal α-1,4-glycosidic bonds in starch, producing shorter dextrins and sugars.")
+    with st.expander("What is a Box–Behnken design?"):
+        st.write("A Box–Behnken design is a response-surface experimental design used to study the effects and interactions of factors with a relatively limited number of experimental runs.")
+    with st.expander("What does the Random Forest model do?"):
+        st.write("A Random Forest Regressor combines predictions from multiple decision trees to estimate a continuous response from the selected process parameters.")
+    with st.expander("How should predictions be interpreted?"):
+        st.write("Predictions are computational estimates generated by the saved model. They are not direct measurements, proof of causality, or experimentally confirmed optimum conditions.")
+    st.markdown("### Reference study")
+    st.write("Khusro et al. (2017), “Optimization of Thermo-Alkali Stable Amylase Production and Biomass Yield from Bacillus sp. Under Submerged Cultivation,” Fermentation, 3(1), 7.")
+    st.caption("Reference-study context is provided for educational background. The demonstration dataset in this app is not the original raw experimental dataset.")
+
+st.sidebar.divider()
+st.sidebar.caption("FermentAI • Academic prototype")
