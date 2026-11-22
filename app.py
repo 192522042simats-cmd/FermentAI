@@ -155,8 +155,16 @@ elif page == "Fermentation Optimizer":
 elif page == "Parameter Analysis":
     st.title("Parameter response explorer")
     st.write("One-factor-at-a-time model predictions. Other conditions are held at the reference setting.")
-    selected = st.selectbox("Parameter to explore", ["Initial pH","Temperature_C","Agitation_rpm","Incubation_Time_h"])
-    ranges = {"Initial_pH":np.linspace(4,8,41),"Temperature_C":np.arange(25,46),"Agitation_rpm":np.arange(120,141),"Incubation_Time_h":np.arange(12,49)}
+    selected = st.selectbox("Parameter to explore", ["Initial_pH", "Temperature_C", "Agitation_rpm", "Incubation_Time_h"])
+ranges = {"Initial_pH":np.linspace(4,8,41), "Temperature_C":np.arange(25,46), "Agitation_rpm":np.arange(120,141), "Incubation_Time_h":np.arange(12,49)}
+base = {"Initial_pH":6.0,"Temperature_C":35,"Agitation_rpm":130,"Incubation_Time_h":24}
+rows = []
+for val in ranges[selected]:
+    params = base.copy()
+    params[selected] = val
+    rows.append({"x":val,"pred":predict_one(params["Initial_pH"],params["Temperature_C"],params["Agitation_rpm"],params["Incubation_Time_h"])})
+
+curve = pd.DataFrame(rows)
     base = {"Initial_pH":6.0,"Temperature_C":35,"Agitation_rpm":130,"Incubation_Time_h":24}
     rows=[]
     for val in ranges[selected]:
