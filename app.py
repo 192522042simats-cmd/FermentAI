@@ -1,492 +1,618 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import joblib
+import matplotlib.pyplot as plt
 from pathlib import Path
 from datetime import datetime
 
 # ============================================================
-# FermentAI | Professional fermentation decision-support app
+# FermentAI
+# Data-driven modelling and optimization of microbial
+# alpha-amylase production using submerged fermentation.
 # ============================================================
 
 st.set_page_config(
-    page_title="FermentAI | Smart Fermentation Platform",
+    page_title="FermentAI | Fermentation Optimizer",
     page_icon="🧫",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-ROOT = Path(__file__).resolve().parent
-MODEL_PATH = ROOT / "random_forest_model.pkl"
-DATA_PATH = ROOT / "BBD_29_Runs_For_Verification_FIXED.csv"
-
-FEATURES = ["Initial_pH", "Temperature_C", "Agitation_rpm", "Incubation_Time_h"]
-LABELS = {
-    "Initial_pH": "Initial pH",
-    "Temperature_C": "Temperature (°C)",
-    "Agitation_rpm": "Agitation speed (rpm)",
-    "Incubation_Time_h": "Incubation time (h)"
-}
-DEFAULTS = {
-    "Initial_pH": 6.0,
-    "Temperature_C": 35.0,
-    "Agitation_rpm": 130.0,
-    "Incubation_Time_h": 24.0
-}
-BOUNDS = {
-    "Initial_pH": (4.0, 8.0),
-    "Temperature_C": (25.0, 45.0),
-    "Agitation_rpm": (120.0, 140.0),
-    "Incubation_Time_h": (12.0, 48.0)
-}
-
-# --------------------------- Design ---------------------------
+# --------------------------- Styling ---------------------------
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
-html, body, [class*="css"] {font-family:'DM Sans',sans-serif;}
-.stApp {background:#f4f7fa;color:#172d3d;}
-[data-testid="stHeader"] {background:rgba(244,247,250,.94);}
-.block-container {padding-top:1.35rem;padding-bottom:3rem;max-width:1500px;}
-h1,h2,h3 {font-family:'Manrope',sans-serif;color:#15364a;}
-section[data-testid="stSidebar"] {background:#eaf1f5;border-right:1px solid #dce6ec;}
-.hero {background:linear-gradient(115deg,#12364a 0%,#126d70 100%);padding:2rem 2.2rem;border-radius:20px;color:white;margin-bottom:1.25rem;}
-.hero h1 {color:white;font-size:2.25rem;margin:0 0 .35rem 0;font-weight:800;}
-.hero p {color:#d9eeee;margin:0;font-size:1rem;}
-.eyebrow {color:#8fd6cc;text-transform:uppercase;letter-spacing:.13em;font-size:.72rem;font-weight:700;margin-bottom:.5rem;}
-.kpi {background:white;border:1px solid #e1e9ef;border-radius:16px;padding:1rem 1.1rem;min-height:112px;box-shadow:0 3px 12px rgba(24,55,73,.035);}
-.kpi-label {color:#667d8c;font-size:.8rem;font-weight:600;}
-.kpi-value {font-family:'Manrope',sans-serif;color:#15394d;font-size:1.55rem;font-weight:800;margin-top:.35rem;}
-.kpi-note {color:#8a9ba6;font-size:.75rem;margin-top:.1rem;}
-.panel {background:white;border:1px solid #e1e9ef;border-radius:16px;padding:1.15rem 1.25rem;margin-bottom:.9rem;}
-.muted {color:#6b808e;font-size:.88rem;}
-.tag {display:inline-block;background:#e7f4f2;color:#176b68;padding:.22rem .55rem;border-radius:20px;font-size:.75rem;font-weight:700;}
-.stButton>button,.stDownloadButton>button {border-radius:10px;font-weight:650;min-height:2.55rem;}
-div[data-testid="stMetric"] {background:white;border:1px solid #e1e9ef;border-radius:14px;padding:13px;}
-div[data-testid="stAlert"] {border-radius:12px;}
-hr {border-color:#e1e9ef;}
+    .stApp { background: #F6F8FB; }
+    [data-testid="stSidebar"] { background: #10243A; }
+    [data-testid="stSidebar"] * { color: #F4F7FB !important; }
+    .main .block-container { padding-top: 1.5rem; padding-bottom: 2.5rem; }
+    h1, h2, h3 { color: #142B45; }
+    .hero {
+        background: linear-gradient(115deg, #10243A 0%, #176B72 100%);
+        padding: 1.5rem 1.8rem; border-radius: 16px; color: white;
+        margin-bottom: 1.2rem;
+    }
+    .hero h1, .hero p { color: white !important; }
+    .metric-card {
+        background: white; border: 1px solid #E4EAF1; border-radius: 13px;
+        padding: 1rem 1.1rem; min-height: 112px;
+        box-shadow: 0 2px 8px rgba(20,43,69,.04);
+    }
+    .metric-label { color: #66788A; font-size: .86rem; }
+    .metric-value { color: #142B45; font-size: 1.65rem; font-weight: 700; margin-top: .25rem; }
+    .soft-note {
+        background: #EAF3F4; border-left: 4px solid #1C8585;
+        padding: .85rem 1rem; border-radius: 8px; color: #20384A;
+    }
+    .warning-note {
+        background: #FFF4E5; border-left: 4px solid #D68A25;
+        padding: .85rem 1rem; border-radius: 8px; color: #503A1B;
+    }
+    div[data-testid="stMetric"] {
+        background: white; border: 1px solid #E4EAF1; padding: 12px 15px;
+        border-radius: 12px;
+    }
+    .stButton button, .stDownloadButton button {
+        border-radius: 9px; font-weight: 600;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------------- Load assets -------------------------
+# --------------------------- Constants ---------------------------
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "random_forest_model.pkl"
+DATA_PATH = BASE_DIR / "BBD_29_Runs_For_Verification_FIXED.csv"
+
+# Use floats consistently in Streamlit sliders. This prevents
+# mixed int/float slider parameter errors across Streamlit versions.
+FACTOR_CONFIG = {
+    "Initial_pH": {
+        "label": "Initial pH", "min": 4.0, "max": 8.0,
+        "default": 6.0, "step": 0.1, "unit": "pH"
+    },
+    "Temperature": {
+        "label": "Temperature", "min": 25.0, "max": 45.0,
+        "default": 35.0, "step": 1.0, "unit": "°C"
+    },
+    "Agitation": {
+        "label": "Agitation speed", "min": 120.0, "max": 140.0,
+        "default": 130.0, "step": 1.0, "unit": "rpm"
+    },
+    "Incubation_time": {
+        "label": "Incubation time", "min": 12.0, "max": 48.0,
+        "default": 24.0, "step": 1.0, "unit": "hours"
+    }
+}
+DEFAULTS = {key: cfg["default"] for key, cfg in FACTOR_CONFIG.items()}
+REFERENCE_ACTIVITY = 145.32
+
+# --------------------------- Helpers ---------------------------
 @st.cache_resource
-def load_model(file_path):
-    return joblib.load(file_path)
+def load_model(path_string):
+    return joblib.load(path_string)
 
 @st.cache_data
-def load_csv(file_path):
-    return pd.read_csv(file_path)
+def load_dataset(path_string):
+    return pd.read_csv(path_string)
 
-model, model_error = None, None
-if MODEL_PATH.exists():
-    try:
-        model = load_model(str(MODEL_PATH))
-    except Exception as exc:
-        model_error = str(exc)
-else:
-    model_error = "random_forest_model.pkl is missing from the repository root."
+def show_metric(label, value):
+    st.markdown(
+        f'<div class="metric-card"><div class="metric-label">{label}</div>'
+        f'<div class="metric-value">{value}</div></div>',
+        unsafe_allow_html=True
+    )
 
-dataset, data_error = None, None
-if DATA_PATH.exists():
-    try:
-        dataset = load_csv(str(DATA_PATH))
-    except Exception as exc:
-        data_error = str(exc)
-else:
-    data_error = "Default dataset CSV is missing. You can upload a CSV in Dataset Explorer."
-
-# ------------------------- Core utilities -------------------------
-def get_model_features():
-    names = getattr(model, "feature_names_in_", None)
-    if names is not None:
-        names = list(names)
-        if len(names) == len(FEATURES) and set(names) == set(FEATURES):
+def resolve_model_features(model):
+    """Return model input feature names in the exact training order."""
+    if hasattr(model, "feature_names_in_"):
+        names = list(model.feature_names_in_)
+        if len(names) == 4:
             return names
-    return FEATURES
+    return list(FACTOR_CONFIG.keys())
 
-def predict_activity(params):
-    if model is None:
-        raise RuntimeError(model_error or "Model unavailable.")
-    order = get_model_features()
-    x = pd.DataFrame([[float(params[k]) for k in order]], columns=order)
-    return float(np.asarray(model.predict(x)).reshape(-1)[0])
+def build_input(values, feature_names):
+    """Build a one-row DataFrame in the model's expected feature order."""
+    row = {}
+    for feature in feature_names:
+        if feature in values:
+            row[feature] = float(values[feature])
+            continue
 
-def target_column(df):
-    preferred = [
-        "Amylase_Activity_U_mL", "Amylase_Activity", "Activity_U_mL",
-        "Enzyme_Activity_U_mL", "Alpha_Amylase_Activity",
-        "Predicted_Activity", "Activity", "Response"
-    ]
-    for col in preferred:
-        if col in df.columns:
-            return col
-    candidates = [c for c in df.select_dtypes(include=np.number).columns if c not in FEATURES]
-    return candidates[0] if candidates else None
+        normalized = feature.lower().replace(" ", "").replace("_", "")
+        matched = None
+        for canonical in FACTOR_CONFIG:
+            candidate = canonical.lower().replace("_", "")
+            if normalized == candidate:
+                matched = canonical
+                break
+        if matched is None:
+            raise ValueError(
+                f"Model expects an unrecognized input feature: {feature}. "
+                "Check the feature columns used during model training."
+            )
+        row[feature] = float(values[matched])
+    return pd.DataFrame([row], columns=feature_names)
 
-def hero(title, subtitle, eyebrow="FERMENTATION INTELLIGENCE"):
+def predict_activity(model, values, feature_names):
+    x = build_input(values, feature_names)
+    prediction = model.predict(x)
+    return float(np.asarray(prediction).reshape(-1)[0])
+
+def parameter_slider(feature, key_prefix=""):
+    cfg = FACTOR_CONFIG[feature]
+    # Explicit keyword arguments + all-float values avoid invalid parameter types.
+    return st.slider(
+        label=cfg["label"],
+        min_value=float(cfg["min"]),
+        max_value=float(cfg["max"]),
+        value=float(cfg["default"]),
+        step=float(cfg["step"]),
+        key=f"{key_prefix}{feature}"
+    )
+
+def make_csv_download(df, filename, label):
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label=label,
+        data=csv_bytes,
+        file_name=filename,
+        mime="text/csv",
+        use_container_width=True
+    )
+
+# --------------------------- Load assets ---------------------------
+model = None
+dataset = None
+model_error = None
+data_error = None
+
+try:
+    if MODEL_PATH.exists():
+        model = load_model(str(MODEL_PATH))
+    else:
+        model_error = f"Model file not found: {MODEL_PATH.name}"
+except Exception as exc:
+    model_error = f"Could not load the model: {exc}"
+
+try:
+    if DATA_PATH.exists():
+        dataset = load_dataset(str(DATA_PATH))
+    else:
+        data_error = f"Dataset file not found: {DATA_PATH.name}"
+except Exception as exc:
+    data_error = f"Could not load the dataset: {exc}"
+
+feature_names = resolve_model_features(model) if model is not None else list(FACTOR_CONFIG.keys())
+
+# --------------------------- Sidebar ---------------------------
+st.sidebar.markdown("## 🧫 FermentAI")
+st.sidebar.caption("Fermentation intelligence platform")
+st.sidebar.markdown("---")
+
+pages = [
+    "Overview",
+    "Smart Optimizer",
+    "Parameter Analysis",
+    "Model Performance",
+    "Dataset Explorer",
+    "Optimization Lab",
+    "Scientific Insights",
+    "Report Center"
+]
+page = st.sidebar.radio("NAVIGATION", pages, index=0)
+st.sidebar.markdown("---")
+st.sidebar.caption("Submerged fermentation • α-Amylase")
+st.sidebar.caption("Research prototype | Version 1.0")
+
+if model_error:
+    st.sidebar.error(model_error)
+if data_error:
+    st.sidebar.warning(data_error)
+
+# --------------------------- Header ---------------------------
+def page_header(title, subtitle):
     st.markdown(
-        f'<div class="hero"><div class="eyebrow">{eyebrow}</div>'
-        f'<h1>{title}</h1><p>{subtitle}</p></div>',
+        f'<div class="hero"><h1>{title}</h1><p>{subtitle}</p></div>',
         unsafe_allow_html=True
     )
 
-def kpi(label, value, note=""):
-    st.markdown(
-        f'<div class="kpi"><div class="kpi-label">{label}</div>'
-        f'<div class="kpi-value">{value}</div><div class="kpi-note">{note}</div></div>',
-        unsafe_allow_html=True
-    )
-
-def model_status():
+def model_required():
     if model is None:
-        st.error("The saved model could not be loaded.")
-        st.code(model_error or "Unknown model-loading error")
-        st.info("Confirm that random_forest_model.pkl is in the same GitHub folder as app.py and that joblib is in requirements.txt.")
+        st.error("The prediction model could not be loaded. Check that random_forest_model.pkl is in the same GitHub folder as app.py.")
         return False
     return True
 
-def params_from_values(ph, temp, rpm, hours):
-    return {
-        "Initial_pH": float(ph),
-        "Temperature_C": float(temp),
-        "Agitation_rpm": float(rpm),
-        "Incubation_Time_h": float(hours)
-    }
-
-def make_csv_download(df, filename, label="Download CSV"):
-    st.download_button(label, df.to_csv(index=False).encode("utf-8"), filename,
-                       "text/csv", use_container_width=False)
-
-# ------------------------- Sidebar navigation -------------------------
-st.sidebar.markdown("# 🧫 FermentAI")
-st.sidebar.caption("SMART FERMENTATION PLATFORM")
-st.sidebar.markdown("---")
-pages = [
-    "Overview", "Smart Optimizer", "Parameter Analysis", "Model Performance",
-    "Dataset Explorer", "Optimization Lab", "Scientific Insights", "Report Center"
-]
-page = st.sidebar.radio("WORKSPACE", pages, index=0)
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Project**")
-st.sidebar.caption("Microbial α-amylase production")
-st.sidebar.caption("Submerged fermentation • ML prototype")
-st.sidebar.markdown("---")
-if model is not None:
-    st.sidebar.success("Model loaded")
-else:
-    st.sidebar.error("Model unavailable")
-if dataset is not None:
-    st.sidebar.caption(f"Dataset: {len(dataset)} rows")
-else:
-    st.sidebar.caption("Dataset: upload required")
-st.sidebar.caption("Prototype • Educational/research use")
-
-# ------------------------- 1. Overview -------------------------
+# ============================================================
+# 1. OVERVIEW
+# ============================================================
 if page == "Overview":
-    hero("FermentAI", "A machine-learning interface for exploring microbial α-amylase production conditions.")
-    st.markdown("### Platform at a glance")
-    c = st.columns(4)
-    with c[0]: kpi("Prediction engine", "Random Forest", "Regression model")
-    with c[1]: kpi("Process variables", "04", "pH • temperature • agitation • time")
-    with c[2]: kpi("Design framework", "BBD", "Box–Behnken reference design")
-    with c[3]: kpi("Cultivation mode", "SmF", "Submerged fermentation")
-    st.markdown("### Your workflow")
-    workflow = [
-        ("01", "Smart Optimizer", "Set operating conditions and estimate enzyme activity."),
-        ("02", "Parameter Analysis", "Explore one-factor response curves."),
-        ("03", "Optimization Lab", "Compare candidate settings within defined ranges."),
-        ("04", "Report Center", "Download a summary of selected conditions and estimates.")
-    ]
-    cols = st.columns(4)
-    for col, (n, title, desc) in zip(cols, workflow):
-        with col:
-            st.markdown(f'<div class="panel"><span class="tag">{n}</span><h4>{title}</h4><div class="muted">{desc}</div></div>', unsafe_allow_html=True)
-    st.markdown("### System status")
-    s1, s2 = st.columns(2)
-    with s1:
-        if model is not None: st.success("Random Forest model file loaded.")
-        else: st.error(f"Model issue: {model_error}")
-    with s2:
-        if dataset is not None: st.success(f"Dataset loaded: {len(dataset)} rows × {len(dataset.columns)} columns.")
-        else: st.warning(data_error or "Dataset not loaded.")
-    st.warning(
-        "**Research transparency:** the supplied BBD CSV is a reconstructed/model-generated "
-        "demonstration dataset, not the original raw experimental measurements. The saved model "
-        "was trained using that reconstructed target data. Therefore, predictions and optimization "
-        "outputs are prototype estimates, not experimentally validated results."
+    page_header(
+        "FermentAI",
+        "Machine-learning-assisted exploration of fermentation parameters for microbial α-amylase production."
     )
 
-# ------------------------- 2. Smart Optimizer -------------------------
+    st.markdown("""
+    FermentAI is a research prototype that uses a trained Random Forest regression model
+    to estimate α-amylase activity from four submerged-fermentation parameters.
+    """)
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        show_metric("Model", "Random Forest")
+    with c2:
+        show_metric("Input factors", "4")
+    with c3:
+        show_metric("Reference design", "29 runs")
+    with c4:
+        show_metric("Process", "SmF")
+
+    st.subheader("How FermentAI works")
+    steps = st.columns(4)
+    step_content = [
+        ("01 · Input", "Enter pH, temperature, agitation and incubation time."),
+        ("02 · Predict", "The trained model estimates the response."),
+        ("03 · Explore", "Compare how changing one factor affects predictions."),
+        ("04 · Optimize", "Screen candidate combinations within the study ranges.")
+    ]
+    for col, (heading, body) in zip(steps, step_content):
+        with col:
+            st.markdown(f"**{heading}**")
+            st.write(body)
+
+    st.markdown(
+        '<div class="warning-note"><b>Scientific transparency:</b> '
+        'The currently available CSV is a reconstructed/model-generated verification '
+        'dataset, not the original raw experimental measurements. Therefore, model '
+        'predictions and optimization rankings are exploratory estimates and must not '
+        'be presented as experimentally validated results.</div>',
+        unsafe_allow_html=True
+    )
+    st.caption(
+        "Literature reference: Khusro et al. (2017), Optimization of Thermo-Alkali Stable "
+        "Amylase Production and Biomass Yield from Bacillus sp. Under Submerged Cultivation, "
+        "Fermentation, 3(1), 7."
+    )
+
+# ============================================================
+# 2. SMART OPTIMIZER
+# ============================================================
 elif page == "Smart Optimizer":
-    hero("Smart Optimizer", "Adjust fermentation settings and generate a model-based activity estimate.")
-    if model_status():
-        left, right = st.columns([1, 1], gap="large")
+    page_header("Smart Optimizer", "Estimate α-amylase activity for a selected fermentation condition.")
+
+    if model_required():
+        left, right = st.columns([1, 1.15], gap="large")
         with left:
-            st.markdown("### Define process conditions")
-            ph = st.slider("Initial pH", 4.0, 8.0, 6.0, 0.1, key="opt_ph")
-            temp = st.slider("Temperature (°C)", 25, 45, 35, 1, key="opt_temp")
-            rpm = st.slider("Agitation speed (rpm)", 120, 140, 130, 1, key="opt_rpm")
-            hours = st.slider("Incubation time (hours)", 12, 48, 24, 1, key="opt_hours")
-            predict_clicked = st.button("⚡ Generate prediction", type="primary", use_container_width=True)
-            st.caption("Input limits follow the factor ranges used in this prototype.")
+            st.subheader("Fermentation inputs")
+            values = {}
+            for feature in FACTOR_CONFIG:
+                values[feature] = parameter_slider(feature, "smart_")
+            predict_clicked = st.button("Predict activity", type="primary", use_container_width=True)
+
         with right:
-            st.markdown("### Prediction output")
-            if predict_clicked or "fermentai_prediction" not in st.session_state:
+            st.subheader("Prediction result")
+            if predict_clicked:
                 try:
-                    p = params_from_values(ph, temp, rpm, hours)
-                    st.session_state["fermentai_prediction"] = predict_activity(p)
-                    st.session_state["fermentai_params"] = p
-                    st.session_state["fermentai_prediction_time"] = datetime.now().strftime("%d %b %Y, %H:%M")
+                    result = predict_activity(model, values, feature_names)
+                    st.session_state["last_prediction"] = {
+                        "values": values.copy(),
+                        "activity": result,
+                        "time": datetime.now().strftime("%Y-%m-%d %H:%M")
+                    }
+                    st.metric("Estimated α-amylase activity", f"{result:.2f} U/mL")
+                    st.caption("Model estimate only — not a measured experimental result.")
                 except Exception as exc:
                     st.error(f"Prediction failed: {exc}")
-            if "fermentai_prediction" in st.session_state:
-                st.metric("Predicted α-amylase activity", f'{st.session_state["fermentai_prediction"]:.2f} U/mL')
-                st.markdown("**Input conditions**")
-                p = st.session_state["fermentai_params"]
-                for key in FEATURES:
-                    st.write(f"• {LABELS[key]}: **{p[key]:g}**")
-                st.caption(f"Generated: {st.session_state.get('fermentai_prediction_time', '—')}")
-                st.download_button(
-                    "Download prediction summary",
-                    pd.DataFrame([{
-                        "Predicted_Activity_U_mL": st.session_state["fermentai_prediction"],
-                        **p
-                    }]).to_csv(index=False).encode("utf-8"),
-                    "FermentAI_prediction.csv", "text/csv"
-                )
-        st.info("This is a model estimate, not a laboratory measurement or proof of an optimum.")
+            elif "last_prediction" in st.session_state:
+                saved = st.session_state["last_prediction"]
+                st.metric("Last estimated activity", f"{saved['activity']:.2f} U/mL")
+                st.caption(f"Last prediction: {saved['time']}")
+            else:
+                st.info("Choose the fermentation parameters and click **Predict activity**.")
 
-# ------------------------- 3. Parameter Analysis -------------------------
+            st.markdown(
+                '<div class="soft-note">Prediction is generated by the saved Random Forest '
+                'model using the four input parameters.</div>',
+                unsafe_allow_html=True
+            )
+
+# ============================================================
+# 3. PARAMETER ANALYSIS
+# ============================================================
 elif page == "Parameter Analysis":
-    hero("Parameter Analysis", "Study the model response while changing one factor and holding the others constant.")
-    if model_status():
-        selected = st.selectbox("Select a parameter", FEATURES, format_func=lambda x: LABELS[x])
-        st.markdown("### Reference settings for remaining factors")
-        a, b, c = st.columns(3)
-        other_features = [x for x in FEATURES if x != selected]
+    page_header("Parameter Analysis", "Explore the model-estimated response as one fermentation factor changes.")
+
+    if model_required():
+        selected_feature = st.selectbox(
+            "Select the parameter to analyze",
+            options=list(FACTOR_CONFIG.keys()),
+            format_func=lambda x: FACTOR_CONFIG[x]["label"]
+        )
+
+        st.markdown("#### Set the other three parameters")
         base = DEFAULTS.copy()
-        controls = {
-            "Initial_pH": (a, "Initial pH", 4.0, 8.0, 0.1),
-            "Temperature_C": (b, "Temperature (°C)", 25, 45, 1),
-            "Agitation_rpm": (c, "Agitation (rpm)", 120, 140, 1),
-            "Incubation_Time_h": (st, "Incubation time (h)", 12, 48, 1)
-        }
-        for feature in other_features:
-            container, label, lo, hi, step = controls[feature]
-            with container:
-                base[feature] = st.slider(label, lo, hi, DEFAULTS[feature], step, key=f"analysis_{feature}")
-        if selected == "Initial_pH":
-            values = np.linspace(4, 8, 41)
-        else:
-            values = np.arange(int(BOUNDS[selected][0]), int(BOUNDS[selected][1]) + 1, 1)
+        other_features = [f for f in FACTOR_CONFIG if f != selected_feature]
+
+        # The three controls are rendered explicitly. All values passed to
+        # st.slider are floats (min/max/default/step), preventing type errors.
+        control_cols = st.columns(3)
+        for col, feature in zip(control_cols, other_features):
+            cfg = FACTOR_CONFIG[feature]
+            with col:
+                base[feature] = st.slider(
+                    label=cfg["label"],
+                    min_value=float(cfg["min"]),
+                    max_value=float(cfg["max"]),
+                    value=float(cfg["default"]),
+                    step=float(cfg["step"]),
+                    key=f"analysis_control_{feature}"
+                )
+
+        cfg = FACTOR_CONFIG[selected_feature]
+        st.markdown(f"#### Response across {cfg['label'].lower()} values")
+        sweep_values = np.linspace(float(cfg["min"]), float(cfg["max"]), 41)
         results = []
         try:
-            for value in values:
-                test_params = base.copy()
-                test_params[selected] = float(value)
-                results.append({"Parameter value": float(value),
-                                "Predicted activity (U/mL)": predict_activity(test_params)})
-            curve = pd.DataFrame(results)
-            best_row = curve.loc[curve["Predicted activity (U/mL)"].idxmax()]
-            st.metric("Highest estimate within displayed sweep",
-                      f'{best_row["Predicted activity (U/mL)"]:.2f} U/mL',
-                      f'{LABELS[selected]} = {best_row["Parameter value"]:g}')
-            fig, ax = plt.subplots(figsize=(10, 4.5))
-            ax.plot(curve["Parameter value"], curve["Predicted activity (U/mL)"], marker="o", linewidth=2)
-            ax.axvline(DEFAULTS[selected], linestyle="--", alpha=.65, label="Reference setting")
-            ax.set_xlabel(LABELS[selected])
-            ax.set_ylabel("Predicted activity (U/mL)")
-            ax.set_title(f"One-factor model response: {LABELS[selected]}")
-            ax.grid(alpha=.25)
-            ax.legend()
-            st.pyplot(fig, use_container_width=True)
-            with st.expander("View response table"):
-                st.dataframe(curve, use_container_width=True, hide_index=True)
-            make_csv_download(curve, f"FermentAI_{selected}_response.csv", "Download response curve data")
-            st.caption("One-factor-at-a-time model exploration; interactions are not fully explored by this plot.")
+            for value in sweep_values:
+                trial = base.copy()
+                trial[selected_feature] = float(value)
+                results.append(predict_activity(model, trial, feature_names))
+
+            chart_df = pd.DataFrame({
+                cfg["label"]: sweep_values,
+                "Predicted activity (U/mL)": results
+            })
+            st.line_chart(
+                chart_df.set_index(cfg["label"]),
+                use_container_width=True
+            )
+            best_index = int(np.argmax(results))
+            m1, m2 = st.columns(2)
+            m1.metric("Highest estimate in this sweep", f"{results[best_index]:.2f} U/mL")
+            m2.metric(
+                f"{cfg['label']} at highest estimate",
+                f"{sweep_values[best_index]:.1f} {cfg['unit']}"
+            )
+            st.caption("This is a one-factor-at-a-time model exploration, not a new experiment.")
+            with st.expander("View sweep data"):
+                st.dataframe(chart_df, use_container_width=True)
+                make_csv_download(chart_df, "fermentai_parameter_sweep.csv", "Download sweep data")
         except Exception as exc:
-            st.error(f"Could not calculate response curve: {exc}")
+            st.error(f"Parameter analysis could not be completed: {exc}")
 
-# ------------------------- 4. Model Performance -------------------------
+# ============================================================
+# 4. MODEL PERFORMANCE
+# ============================================================
 elif page == "Model Performance":
-    hero("Model Performance", "Inspect model properties and available dataset-level diagnostics.")
-    if model_status():
-        c1, c2, c3 = st.columns(3)
-        with c1: kpi("Algorithm", "Random Forest", "Regression")
-        with c2: kpi("Input features", str(len(get_model_features())), "Expected process variables")
-        with c3: kpi("Trees", str(getattr(model, "n_estimators", "Not exposed")), "Estimator count")
-        st.markdown("### Feature importance")
-        importances = getattr(model, "feature_importances_", None)
-        order = get_model_features()
-        if importances is not None and len(importances) == len(order):
-            imp = pd.DataFrame({"Feature": [LABELS.get(x, x) for x in order],
-                                "Importance": np.asarray(importances, dtype=float)}).sort_values("Importance")
-            fig, ax = plt.subplots(figsize=(9, 4))
-            ax.barh(imp["Feature"], imp["Importance"])
-            ax.set_xlabel("Relative importance")
-            ax.set_title("Random Forest feature importance")
-            ax.grid(axis="x", alpha=.2)
-            st.pyplot(fig, use_container_width=True)
-            st.dataframe(imp.sort_values("Importance", ascending=False), use_container_width=True, hide_index=True)
-        else:
-            st.info("Feature-importance values are not available for this model.")
-        if dataset is not None:
-            st.markdown("### Dataset availability")
-            st.write(f"Loaded dataset: **{len(dataset)} rows** and **{len(dataset.columns)} columns**.")
-            st.caption("This page does not report training or cross-validation scores as validated performance. The supplied target values are reconstructed/model-generated.")
-        st.warning("Feature importance describes how the fitted model uses input variables. It does not establish biological causation or independent predictive validity.")
+    page_header("Model Performance", "Inspect the saved model and its available metadata.")
 
-# ------------------------- 5. Dataset Explorer -------------------------
+    if model_required():
+        a, b, c = st.columns(3)
+        with a:
+            show_metric("Algorithm", type(model).__name__)
+        with b:
+            n_features = getattr(model, "n_features_in_", len(feature_names))
+            show_metric("Input features", str(n_features))
+        with c:
+            show_metric("Training samples", "Not verified")
+
+        st.subheader("Input features")
+        st.write(", ".join(feature_names))
+
+        if hasattr(model, "feature_importances_"):
+            importance = pd.DataFrame({
+                "Feature": feature_names,
+                "Importance": model.feature_importances_
+            }).sort_values("Importance", ascending=False)
+            st.subheader("Random Forest feature importance")
+            st.bar_chart(importance.set_index("Feature"))
+            st.dataframe(importance, use_container_width=True)
+        else:
+            st.info("Feature-importance values are not available for this model object.")
+
+        st.markdown(
+            '<div class="warning-note"><b>Important:</b> No accuracy, R², RMSE, MAE, '
+            'or independent validation score is displayed unless it is calculated from '
+            'a verified held-out experimental dataset. The current reconstructed dataset '
+            'cannot establish experimental predictive validity.</div>',
+            unsafe_allow_html=True
+        )
+
+# ============================================================
+# 5. DATASET EXPLORER
+# ============================================================
 elif page == "Dataset Explorer":
-    hero("Dataset Explorer", "Upload, inspect, filter and export fermentation datasets.")
-    uploaded = st.file_uploader("Upload a CSV file", type=["csv"], key="dataset_upload")
-    df = None
+    page_header("Dataset Explorer", "Inspect the reference dataset or upload a CSV for exploration.")
+
+    uploaded = st.file_uploader("Upload a CSV dataset (optional)", type=["csv"])
+    active_data = dataset
     if uploaded is not None:
         try:
-            df = pd.read_csv(uploaded)
-            st.success("Uploaded CSV loaded successfully.")
+            active_data = pd.read_csv(uploaded)
+            st.success("Uploaded dataset loaded.")
         except Exception as exc:
-            st.error(f"Could not read the uploaded file: {exc}")
-    elif dataset is not None:
-        df = dataset.copy()
-        st.caption("Showing the repository's default dataset.")
+            st.error(f"Could not read uploaded CSV: {exc}")
+            active_data = None
+
+    if active_data is None:
+        st.warning("No dataset is available. Add BBD_29_Runs_For_Verification_FIXED.csv beside app.py or upload a CSV.")
     else:
-        st.info(data_error or "Upload a CSV file to begin.")
-    if df is not None:
-        m1, m2, m3, m4 = st.columns(4)
-        with m1: kpi("Rows", f"{len(df):,}")
-        with m2: kpi("Columns", f"{len(df.columns):,}")
-        with m3: kpi("Missing values", f"{int(df.isna().sum().sum()):,}")
-        with m4: kpi("Duplicate rows", f"{int(df.duplicated().sum()):,}")
-        st.markdown("### Data preview")
-        st.dataframe(df, use_container_width=True, height=330)
-        numeric = df.select_dtypes(include=np.number).columns.tolist()
-        if numeric:
-            st.markdown("### Interactive numeric filter")
-            col = st.selectbox("Column to filter", numeric)
-            min_v, max_v = float(df[col].min()), float(df[col].max())
-            if np.isfinite(min_v) and np.isfinite(max_v) and min_v < max_v:
-                selected_range = st.slider("Select value range", min_v, max_v, (min_v, max_v), key=f"filter_{col}")
-                filtered = df[df[col].between(selected_range[0], selected_range[1])]
-            else:
-                filtered = df.copy()
-            st.caption(f"{len(filtered)} of {len(df)} rows match the filter.")
-            st.dataframe(filtered, use_container_width=True, hide_index=True)
-            make_csv_download(filtered, "FermentAI_filtered_dataset.csv", "Download filtered data")
-            chart_col = st.selectbox("Optional distribution plot", numeric, key="distribution_col")
-            fig, ax = plt.subplots(figsize=(8, 3.5))
-            ax.hist(df[chart_col].dropna(), bins=15)
-            ax.set_xlabel(chart_col)
+        d1, d2, d3 = st.columns(3)
+        with d1:
+            show_metric("Rows", f"{active_data.shape[0]:,}")
+        with d2:
+            show_metric("Columns", str(active_data.shape[1]))
+        with d3:
+            show_metric("Missing cells", f"{int(active_data.isna().sum().sum())}")
+
+        st.subheader("Dataset preview")
+        st.dataframe(active_data.head(100), use_container_width=True)
+
+        numeric_columns = active_data.select_dtypes(include=np.number).columns.tolist()
+        if numeric_columns:
+            selected_column = st.selectbox("Choose a numeric variable", numeric_columns)
+            st.subheader(f"Distribution of {selected_column}")
+            fig, ax = plt.subplots()
+            ax.hist(active_data[selected_column].dropna(), bins=12, edgecolor="black")
+            ax.set_xlabel(selected_column)
             ax.set_ylabel("Frequency")
-            ax.set_title(f"Distribution of {chart_col}")
-            ax.grid(axis="y", alpha=.2)
-            st.pyplot(fig, use_container_width=True)
+            ax.set_title(f"Distribution of {selected_column}")
+            st.pyplot(fig)
+            plt.close(fig)
+
+            st.subheader("Descriptive statistics")
+            st.dataframe(active_data[numeric_columns].describe().T, use_container_width=True)
         else:
-            make_csv_download(df, "FermentAI_dataset.csv")
+            st.info("No numeric columns were found in this dataset.")
 
-# ------------------------- 6. Optimization Lab -------------------------
+        make_csv_download(active_data, "fermentai_dataset_export.csv", "Download dataset")
+
+        st.markdown(
+            '<div class="warning-note"><b>Dataset note:</b> The project verification CSV '
+            'is reconstructed/model-generated because the original 29-run raw response '
+            'values were not available. Do not describe it as the original experimental dataset.</div>',
+            unsafe_allow_html=True
+        )
+
+# ============================================================
+# 6. OPTIMIZATION LAB
+# ============================================================
 elif page == "Optimization Lab":
-    hero("Optimization Lab", "Compare candidate fermentation settings within the defined process-factor ranges.")
-    if model_status():
-        st.markdown("### Search configuration")
-        left, right = st.columns(2)
-        with left:
-            n_candidates = st.select_slider("Number of candidate combinations", options=[50, 100, 250, 500, 1000], value=250)
-            seed = st.number_input("Random seed", min_value=0, max_value=99999, value=42, step=1)
-        with right:
-            st.caption("Candidates are sampled within the available factor ranges. This is a computational search, not experimental optimization.")
-            st.write("Search bounds")
-            for feature in FEATURES:
-                st.write(f"• {LABELS[feature]}: {BOUNDS[feature][0]:g} to {BOUNDS[feature][1]:g}")
-        if st.button("🔬 Run candidate search", type="primary"):
-            rng = np.random.default_rng(int(seed))
-            candidates = pd.DataFrame({
-                "Initial_pH": rng.uniform(4, 8, n_candidates),
-                "Temperature_C": rng.integers(25, 46, n_candidates),
-                "Agitation_rpm": rng.integers(120, 141, n_candidates),
-                "Incubation_Time_h": rng.integers(12, 49, n_candidates)
-            })
-            try:
-                order = get_model_features()
-                x = candidates[order]
-                candidates["Predicted_Activity_U_mL"] = np.asarray(model.predict(x), dtype=float)
-                candidates = candidates.sort_values("Predicted_Activity_U_mL", ascending=False).reset_index(drop=True)
-                st.session_state["optimization_results"] = candidates
-                st.success(f"Evaluated {len(candidates)} candidate combinations.")
-            except Exception as exc:
-                st.error(f"Candidate search failed: {exc}")
-        if "optimization_results" in st.session_state:
-            result = st.session_state["optimization_results"]
-            best = result.iloc[0]
-            st.markdown("### Top-ranked model candidate")
-            st.metric("Highest predicted activity", f'{best["Predicted_Activity_U_mL"]:.2f} U/mL')
-            st.write("**Candidate settings**")
-            cc = st.columns(4)
-            for col, feature in zip(cc, FEATURES):
-                with col:
-                    st.metric(LABELS[feature], f'{best[feature]:.2f}' if feature == "Initial_pH" else f'{best[feature]:.0f}')
-            st.markdown("### Top 10 candidates")
-            st.dataframe(result.head(10), use_container_width=True, hide_index=True)
-            make_csv_download(result, "FermentAI_optimization_candidates.csv", "Download all candidate results")
-            st.warning("The top-ranked row is only the best among sampled model candidates. Confirm any proposed condition experimentally before making a scientific claim.")
+    page_header("Optimization Lab", "Screen candidate parameter combinations using the saved model.")
 
-# ------------------------- 7. Scientific Insights -------------------------
+    if model_required():
+        st.write("Generate candidate combinations within the parameter ranges used in this project.")
+        n_candidates = st.slider(
+            "Number of candidate combinations",
+            min_value=50, max_value=1000, value=300, step=50,
+            key="optimization_candidate_count"
+        )
+        run_optimization = st.button("Run candidate screening", type="primary")
+
+        if run_optimization:
+            rng = np.random.default_rng(42)
+            candidates = {}
+            for feature, cfg in FACTOR_CONFIG.items():
+                candidates[feature] = rng.uniform(
+                    float(cfg["min"]), float(cfg["max"]), int(n_candidates)
+                )
+            candidate_df = pd.DataFrame(candidates)
+
+            try:
+                prediction_input = candidate_df[feature_names].copy()
+                candidate_df["Predicted_Activity_U_mL"] = np.asarray(
+                    model.predict(prediction_input)
+                ).reshape(-1)
+                ranked = candidate_df.sort_values(
+                    "Predicted_Activity_U_mL", ascending=False
+                ).reset_index(drop=True)
+                ranked.insert(0, "Rank", np.arange(1, len(ranked) + 1))
+                st.session_state["optimization_results"] = ranked
+            except Exception as exc:
+                st.error(f"Optimization screening failed: {exc}")
+
+        if "optimization_results" in st.session_state:
+            ranked = st.session_state["optimization_results"]
+            st.subheader("Top 10 model-ranked candidates")
+            st.dataframe(ranked.head(10), use_container_width=True)
+            best = ranked.iloc[0]
+            st.metric(
+                "Highest predicted activity among screened candidates",
+                f"{best['Predicted_Activity_U_mL']:.2f} U/mL"
+            )
+            make_csv_download(ranked, "fermentai_optimization_candidates.csv", "Download all ranked candidates")
+            st.caption("Candidate ranking is model-based screening, not proof of a true optimum.")
+        st.markdown(
+            '<div class="warning-note"><b>Interpretation:</b> These combinations are '
+            'computational candidates only. Confirm promising conditions experimentally '
+            'before making biological or process-performance claims.</div>',
+            unsafe_allow_html=True
+        )
+
+# ============================================================
+# 7. SCIENTIFIC INSIGHTS
+# ============================================================
 elif page == "Scientific Insights":
-    hero("Scientific Insights", "Understand the biological and statistical context of the prototype.")
-    st.markdown("### Fermentation factors")
-    factor_info = [
+    page_header("Scientific Insights", "Understand the fermentation system and the boundaries of the model.")
+
+    st.subheader("What is submerged fermentation?")
+    st.write(
+        "Submerged fermentation (SmF) is a microbial cultivation process in which "
+        "microorganisms grow in a liquid nutrient medium. Process conditions such as "
+        "pH, temperature, agitation and incubation time can influence growth and enzyme production."
+    )
+
+    st.subheader("Why these four parameters?")
+    explanations = [
         ("Initial pH", "Influences enzyme activity, nutrient availability and microbial physiology."),
         ("Temperature", "Affects microbial growth rate, metabolism and enzyme stability."),
-        ("Agitation speed", "Influences mixing and oxygen transfer in submerged cultivation; excessive agitation can also introduce shear."),
-        ("Incubation time", "Determines the duration available for growth and enzyme accumulation; production may rise or decline over time.")
+        ("Agitation speed", "Influences mixing and oxygen transfer in the fermentation broth."),
+        ("Incubation time", "Determines the duration available for growth and enzyme accumulation.")
     ]
-    for title, desc in factor_info:
-        with st.expander(title):
-            st.write(desc)
-    st.markdown("### Methods used in the application")
-    st.write("**Box–Behnken design (BBD):** a response-surface design used to investigate factor effects and interactions with a structured set of experimental runs.")
-    st.write("**Random Forest regression:** an ensemble learning method that averages predictions from multiple decision trees.")
-    st.write("**One-factor response plot:** varies one input while holding the other inputs fixed. It is useful for visual exploration but does not represent all factor interactions.")
-    st.markdown("### Scientific limitations")
-    st.warning(
-        "The demonstration CSV is reconstructed/model-generated rather than the original raw experimental "
-        "dataset. The saved model's outputs, feature importance and candidate rankings are therefore "
-        "exploratory software demonstrations. They do not establish validated enzyme yields, causal effects, "
-        "or a confirmed fermentation optimum."
+    for heading, body in explanations:
+        with st.expander(heading):
+            st.write(body)
+
+    st.subheader("Reference study")
+    st.write(
+        "Khusro et al. (2017) reported a maximum experimental α-amylase activity of "
+        "145.32 U/mL at pH 6, 35°C, 130 rpm and 24 hours for the reported Bacillus sp. "
+        "submerged cultivation conditions."
     )
-    st.markdown("### Reference study")
-    st.write("Khusro et al. (2017), “Optimization of Thermo-Alkali Stable Amylase Production and Biomass Yield from Bacillus sp. Under Submerged Cultivation,” *Fermentation*, 3(1), 7.")
-    st.caption("The reference study provides background context; this app's demonstration data should not be treated as the paper's raw observations.")
+    st.markdown("[Read the reference paper](https://www.mdpi.com/2311-5637/3/1/7)")
 
-# ------------------------- 8. Report Center -------------------------
+    st.markdown(
+        '<div class="warning-note"><b>Limitations:</b> The original raw 29-run response '
+        'table is unavailable in this project workspace. A reconstructed/model-generated '
+        'CSV was used for the current demonstration model. Therefore, this application '
+        'demonstrates a computational workflow; it does not establish experimentally '
+        'validated prediction accuracy or a newly discovered optimum.</div>',
+        unsafe_allow_html=True
+    )
+
+# ============================================================
+# 8. REPORT CENTER
+# ============================================================
 elif page == "Report Center":
-    hero("Report Center", "Generate a downloadable summary of model predictions and computational exploration.")
-    st.markdown("### Prediction report")
-    if "fermentai_prediction" in st.session_state:
-        pred = st.session_state["fermentai_prediction"]
-        params = st.session_state["fermentai_params"]
-        st.metric("Most recent predicted activity", f"{pred:.2f} U/mL")
-        report_df = pd.DataFrame([{
-            "Generated_at": st.session_state.get("fermentai_prediction_time", ""),
-            **params,
-            "Predicted_Activity_U_mL": pred,
-            "Interpretation": "Model estimate only; not experimentally validated"
-        }])
-        st.dataframe(report_df, use_container_width=True, hide_index=True)
-        make_csv_download(report_df, "FermentAI_prediction_report.csv", "Download prediction report")
-    else:
-        st.info("Run a prediction in Smart Optimizer first. Your latest result will appear here.")
-    st.markdown("### Optimization report")
-    if "optimization_results" in st.session_state:
-        opt = st.session_state["optimization_results"]
-        st.write(f"Candidate combinations evaluated: **{len(opt)}**")
-        st.dataframe(opt.head(10), use_container_width=True, hide_index=True)
-        make_csv_download(opt, "FermentAI_optimization_report.csv", "Download optimization report")
-    else:
-        st.info("Run a candidate search in Optimization Lab to generate an optimization report.")
-    st.markdown("### Reporting note")
-    st.warning("All report outputs are computational model estimates based on the supplied reconstructed/model-generated training data. Do not describe them as experimentally confirmed results.")
+    page_header("Report Center", "Export prediction records and optimization screening results.")
 
-st.sidebar.markdown("---")
-st.sidebar.caption("FermentAI • Research prototype")
+    st.subheader("Latest prediction")
+    if "last_prediction" in st.session_state:
+        saved = st.session_state["last_prediction"]
+        prediction_report = pd.DataFrame([{
+            **saved["values"],
+            "Predicted_Activity_U_mL": saved["activity"],
+            "Generated_At": saved["time"],
+            "Status": "Model estimate — not experimentally validated"
+        }])
+        st.dataframe(prediction_report, use_container_width=True)
+        make_csv_download(
+            prediction_report,
+            "fermentai_prediction_report.csv",
+            "Download prediction report"
+        )
+    else:
+        st.info("No prediction has been generated in this session yet. Use Smart Optimizer first.")
+
+    st.divider()
+    st.subheader("Optimization screening report")
+    if "optimization_results" in st.session_state:
+        optimization_report = st.session_state["optimization_results"]
+        st.dataframe(optimization_report.head(20), use_container_width=True)
+        make_csv_download(
+            optimization_report,
+            "fermentai_optimization_report.csv",
+            "Download optimization report"
+        )
+    else:
+        st.info("No optimization screening has been run in this session yet.")
+
+    st.caption(
+        "Reports contain model-generated estimates. They should not be interpreted "
+        "as experimental measurements."
+    )
+
+# --------------------------- Footer ---------------------------
+st.markdown("---")
+st.caption(
+    "FermentAI • Academic research prototype • Results require experimental verification."
+)
